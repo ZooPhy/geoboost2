@@ -1,0 +1,2 @@
+model_checkpoint_path: "BILSTMP"
+all_model_checkpoint_paths: "BILSTMP"

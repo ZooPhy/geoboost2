@@ -1,0 +1,3 @@
+# ignore everything except .gitignore just to keep directory
+*
+!.gitignore
