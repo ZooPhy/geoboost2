@@ -9,8 +9,6 @@ import psycopg2
 
 from zodo.GenBank import GenBankRequest
 
-ZOOPHY_DB = 'GenBankViruses_UI'
-
 SQL_INSERT_POSS = "INSERT INTO \"Possible_Location\" (\"Accession\", \"Geoname_ID\", \"Location\", \"Latitude\", \"Longitude\", \"probability\") VALUES(%s,%s,%s,%s,%s,%s)"
 SQL_DELETE_POSS = "DELETE FROM \"Possible_Location\" WHERE \"Accession\" = %s"
 
@@ -59,8 +57,7 @@ def get_rows_from_db(query: str):
     conn = None
     try:
         params = config()
-        params['database'] = ZOOPHY_DB
-        logging.debug("Connecting to DB %s", ZOOPHY_DB)
+        logging.debug("Connecting to DB - %s", params['database'])
         conn = psycopg2.connect(**params)
         cur = conn.cursor()
         logging.debug("Executing '%s'", query)
@@ -84,7 +81,6 @@ def execute(query: str) -> None:
     conn = None
     try:
         params = config()
-        params['database'] = ZOOPHY_DB
         logging.debug("\nConnecting to DB - %s", params['database'])
         conn = psycopg2.connect(**params)
         cur = conn.cursor()
@@ -109,7 +105,6 @@ def execute_on_many_rows(query: str, rows):
     conn = None
     try:
         params = config()
-        params['database'] = ZOOPHY_DB
         logging.debug("\nConnecting to DB - %s", params['database'])
         conn = psycopg2.connect(**params)
         cur = conn.cursor()
