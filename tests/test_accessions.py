@@ -18,7 +18,12 @@ from zodo.utils import load_static_objects
 
 GEONAMES_GIDLOOKUP_URL = "http://"+GEO_HOST+":"+GEO_PORT+"/search?query=GeonameId:GIDPH"
 
+GEONAMES_LOOKUP_URL = "http://"+GEO_HOST+":"+GEO_PORT+"/location?location=LPH&count=1&mode=full"
+
 cache = {}
+
+def clean(n):
+  return re.sub(r" \([^)]*\)", "", n)
 
 def get_geoname(geonameid):
     if geonameid in cache:
@@ -36,11 +41,26 @@ def get_geoname(geonameid):
             return False
     return loc
 
-def isSameLoc(gid1, gid2, metric="id"):
+def lookup_geoname(geoname):
+    if geoname in cache:
+        return cache[geoname]
+    else:
+        url = GEONAMES_LOOKUP_URL.replace("LPH", str(geoname))
+        response = requests.get(url)
+        jsondata = response.json()
+        if jsondata and "retrieved" in jsondata and int(jsondata["retrieved"]) > 0:
+            loc = jsondata["records"][0]
+            cache[geoname] = loc
+        else:
+            logging.warning("Search returned no results: '"+ str(geoname) +"'->'"+url+"'")
+            cache[geoname] = False
+            return False
+    return loc
+
+def isSameLoc(gid1, gid2, metric):
     """Metrics calculating if given two geonames objects are same or similar.
     Supported metrics include {id, 50m(i.e.80.5km), 100m(i.e.161km), country, state}
     """
-    # gid1, gid2 = gid1.strip(), gid2.strip()
     if not gid1 or not gid2:
         return False
     loc1 = get_geoname(gid1)
@@ -57,9 +77,20 @@ def isSameLoc(gid1, gid2, metric="id"):
         same = dist < 50 if metric=="50m" else dist < 100
         return same
     elif metric=="country":
-        return loc1["Country"] == loc2["Country"]
+        if "Country" in loc2:
+            return "Country" in loc1 and loc1["Country"] == loc2["Country"]
+        else:
+            return "NA"
     elif metric=="state":
-        return loc1["State"] == loc2["State"]
+        if "State" in loc2:
+            return "State" in loc1 and loc1["State"] == loc2["State"]
+        else:
+            return "NA"
+    elif metric=="county":
+        if "County" in loc2:
+            return "County" in loc1 and loc1["County"] == loc2["County"]
+        else:
+            return "NA"
     else:
         return False
 
@@ -89,20 +120,15 @@ def get_predictions(df, top=1):
             pred_geoids[row['Accession']] = set()
             pred_locs[row['Accession']] = row['Location']
         if len(pred_geoids[row['Accession']]) < top:
-            pred_geoids[row['Accession']].add(row['GeonameID'])
-    # print(dicts)
+            pred_geoids[row['Accession']].add(str(row['GeonameID']))
     return pred_geoids, pred_locs
 
-def evaluate(gold, lookup):
-    gold['Correct_ID'] = gold.apply(lambda row: True if row["Accession"] in lookup and any([isSameLoc(x, row["GeonameID"], metric="id") for x in lookup[row["Accession"]]]) else False, axis=1)
-    gold['Correct_50m'] = gold.apply(lambda row: True if row["Accession"] in lookup and any([isSameLoc(x, row["GeonameID"], metric="50m") for x in lookup[row["Accession"]]]) else False, axis=1)
-    gold['Correct'] = gold.apply(lambda row: True if row["Correct_ID"] or row["Correct_50m"] else False, axis=1)
-
-    # print stats
-    total_valid = gold.Accession.count()
-    correct_id, correct_50m, correct = gold[gold.Correct_ID == True], gold[gold.Correct_50m == True], gold[gold.Correct == True]
-    acc_id, acc_50m, acc = round(correct_id.Accession.count()/total_valid, 2), round(correct_50m.Accession.count()/total_valid, 2), round(correct.Accession.count()/total_valid, 2)
-    logging.info("Accuracy ID:%s 50m:%s, Overall:%s", acc_id, acc_50m, acc)
+def evaluate(gold, lookup, metric="id"):
+    col = 'Correct_'+metric
+    gold[col] = gold.apply(lambda row: isSameLoc(next(iter(lookup[row["Accession"]])), row["GeonameID"], metric=metric) if row["Accession"] in lookup and len(lookup[row["Accession"]])>0 else False, axis=1)
+    correct, count = gold[gold[col] == True].Accession.count(), gold[gold[col] != "NA"].Accession.count()
+    acc = round((correct*100)/count, 2)
+    logging.info("Metric: %s Correct: %s, Count: %s, Accuracy :%s", metric, correct, count, acc)
     return gold, acc
 
 def get_args():
@@ -213,17 +239,16 @@ def test_genbank_pubmedoa_performance():
     v1 = pd.read_csv("resources/GeoBoost_v1/articles_6529/Confidence.txt", sep="\t")
     v1_pred, _ = get_predictions(v1, top=1)
     logging.info("Evaluating dataset v1 - %s", len(v1_pred))
-    v1_result, v1_acc = evaluate(valid_accessions, v1_pred)
+    v1_result, v1_acc = evaluate(valid_accessions, v1_pred, metric="50m")
     v1_result.to_csv("resources/GeoBoost_v1/articles_6529/Results.csv", sep="\t")
 
     v2 = pd.read_csv("resources/GeoBoost_v2/articles_6529/Confidence.txt", sep="\t")
     v2_pred, _ = get_predictions(v2, top=1)
     logging.info("Evaluating dataset v2 - %s", len(v2_pred))
-    v2_result, v2_acc = evaluate(valid_accessions, v2_pred)
+    v2_result, v2_acc = evaluate(valid_accessions, v2_pred, metric="50m")
     v2_result.to_csv("resources/GeoBoost_v2/articles_6529/Results.csv", sep="\t")
 
     assert v2_acc > v1_acc
-
 
 def test_genbank_metadata_performance():
     '''Test the rows in the dataframe'''
@@ -241,14 +266,48 @@ def test_genbank_metadata_performance():
     v1 = pd.read_csv("resources/GeoBoost_v1/metadata_7719/Confidence.txt", sep="\t")
     v1_pred, _ = get_predictions(v1, top=1)
     logging.info("Evaluating dataset v1 - %s", len(v1_pred))
-    v1_result, v1_acc = evaluate(valid_accessions, v1_pred)
+    v1_result, v1_acc = evaluate(valid_accessions, v1_pred, metric="50m")
     v1_result.to_csv("resources/GeoBoost_v1/metadata_7719/Results.csv", sep="\t")
 
     v2 = pd.read_csv("resources/GeoBoost_v2/metadata_7719/Confidence.txt", sep="\t")
     v2_pred, _ = get_predictions(v2, top=1)
     logging.info("Evaluating dataset v2 - %s", len(v2_pred))
-    v2_result, v2_acc = evaluate(valid_accessions, v2_pred)
+    v2_result, v2_acc = evaluate(valid_accessions, v2_pred, metric="50m")
     v2_result.to_csv("resources/GeoBoost_v2/metadata_7719/Results.csv", sep="\t")
 
     assert v2_acc > v1_acc
 
+def test_genbank_influenza_study():
+    '''Test the rows in the dataframe'''
+    logging.info("Evaluating performance with locations in metadata")
+    gold = pd.read_csv("resources/SDA/v3/Influenza_CaseStudy_5728_expanded.csv", sep="\t", converters={'GeonameID': str})
+    # validate entries
+    gold['GID_Valid'] = gold.apply(lambda row: False if not row['GeonameID'] or row['GeonameID'] != row['GeonameID'] or not row['GeonameID'].strip().isdigit() else True, axis=1)
+    gold['Valid'] = gold.apply(lambda row: True if row['GID_Valid'] else False, axis=1)
+    valid_accessions = gold[gold.Valid == True]
+    logging.info("Found %s valid entries out of %s rows", valid_accessions.Accession.count(), gold.Accession.count())
+    
+    logging.info("Testing between GeoBoost v1 and GeoBoost v2 files")
+
+    adm1 = pd.read_csv("resources/GeoBoost_v2/influenza_5728/ADM1/Confidence.txt", sep="\t")
+    adm1_pred, _ = get_predictions(adm1, top=1)
+    logging.info("Evaluating dataset at ADM1 - %s", len(adm1_pred))
+    results, acc_id = evaluate(valid_accessions, adm1_pred, metric="id")
+    results, acc_50m = evaluate(results, adm1_pred, metric="50m")
+    results, acc_country = evaluate(results, adm1_pred, metric="country")
+    results, acc_state = evaluate(results, adm1_pred, metric="state")
+    results, acc_county = evaluate(results, adm1_pred, metric="county")
+
+    logging.info("Accuracy - ID: %s, 50m: %s, Country: %s, State: %s, County: %s",
+                 acc_id, acc_50m, acc_country, acc_state, acc_county)
+    # adm2 = pd.read_csv("resources/GeoBoost_v2/influenza_5728/ADM2/Confidence.txt", sep="\t")
+    # adm2_pred, _ = get_predictions(adm2, top=1)
+    # logging.info("Evaluating dataset at ADM2 - %s", len(adm2_pred))
+    # adm2_result, adm2_acc = evaluate(valid_accessions, adm2_pred)
+
+    # adm2_result['Correct'] = adm2_result.apply(lambda row: True if row["ADM1_Correct_50m"] or row["ADM2_Correct_50m"] else False, axis=1)
+    logging.info("Writing results to file")
+    results.to_csv("resources/GeoBoost_v2/influenza_5728/Results.csv", sep="\t")
+    logging.info("Done")
+    assert 2 > 1
+    

@@ -5,10 +5,11 @@ import jsonpickle
 import redis
 import json
 import logging
+from os.path import exists
 from zodo.settings import (API_KEY, EXTRACT_LINKS, GB_BATCH_SIZE,
                            GB_PM_LINK_BATCH_SIZE, REDIS_PMC_CACHE_DB, REDIS_PMC_PROCESSED_DB,
-                           REDIS_HOST, REDIS_PASSWORD, REDIS_PORT, USE_REDIS)
-from zodo.utils import (http_get_query, download_pubmed_record, MODE_STRICT,
+                           REDIS_HOST, REDIS_PASSWORD, REDIS_PORT, USE_REDIS, SUPPLEMENTAL_DATA_DIR)
+from zodo.utils import (http_get_query, download_pubmed_record, extract_text_from_files, MODE_STRICT,
                         lookup_location_pop, extract_probability, NamedEntityObj)
 from zodo.ner.ner_utils import LOC_ANN_TAG, TABLE_LOC_TAG, TABLE_ACCN_TAG, detect, load_ner
 
@@ -44,6 +45,7 @@ class PubMedRequest(object):
                         raw_json = unpr_red.get(pmid)
                         logging.debug("%s found in PMC cache DB", pmid)
                     else:
+                        # download json
                         raw_json = download_pubmed_record(pmid)
                         if not raw_json:
                             continue
@@ -54,8 +56,12 @@ class PubMedRequest(object):
                         except Exception as e2:
                             logging.error("Invalid JSON: %s for %s", e2, pmid)
                             continue
+                    # if files have been downloaded
+                    raw_text = ""
+                    if exists(SUPPLEMENTAL_DATA_DIR+pmid):
+                        raw_text = extract_text_from_files(SUPPLEMENTAL_DATA_DIR+pmid)
                     # create record object and process
-                    pubmed_record = PubMedRecord(pmid, raw_json)
+                    pubmed_record = PubMedRecord(pmid, raw_json, raw_text)
                     pubmed_record.extract_entities()
                     cache_dict = pubmed_record.normalize_entities(cache_dict)
                     self.pubmed_records[pmid] = pubmed_record
@@ -65,9 +71,16 @@ class PubMedRequest(object):
         else:
             # if not using redis cache, just download the articles and process
             for pmid in self.pubmedids:
-                raw_json = download_pubmed_record(pmid)
-                if raw_json:
-                    pubmed_record = PubMedRecord(pmid, raw_json)
+                # if files have been downloaded
+                if exists(SUPPLEMENTAL_DATA_DIR+pmid):
+                    raw_text = extract_text_from_files(SUPPLEMENTAL_DATA_DIR+pmid)
+                    raw_json = "{}"
+                else:
+                    raw_text = ""
+                    # download json
+                    raw_json = download_pubmed_record(pmid)
+                if raw_json or raw_text:
+                    pubmed_record = PubMedRecord(pmid, raw_json, raw_text)
                     self.pubmed_records[pmid] = pubmed_record
                     pubmed_record.extract_entities()
                     cache_dict = pubmed_record.normalize_entities(cache_dict)
@@ -95,12 +108,12 @@ class PubMedRequest(object):
 
 class PubMedRecord(object):
     '''PubMed object which contains necessary fields for location extraction'''
-    def __init__(self, pmid, raw_json):
+    def __init__(self, pmid, raw_json, raw_text):
         # placeholders
         self.pmid = pmid
         self.raw_json = raw_json
         # available after processing
-        self.raw_text = ""
+        self.raw_text = raw_text
         self.open_access = False
         # self.proc_json = "" # to be used for adding annotations in bioc
         self.spans = []
@@ -110,9 +123,13 @@ class PubMedRecord(object):
         '''uses the NER to extract entities'''
         # There are problems with loading biocjson for many records retrieved from API
         # TODO: Investigate the errors and fix them, until then use json
-        doc_bioc = json.loads(self.raw_json)
-        self.open_access = True if doc_bioc["source"] == "PMC" else False
-        self.spans, self.raw_text = detect(doc_bioc, bioc_json=True)
+        if self.raw_text:
+            self.open_access = False
+            self.spans, self.raw_text = detect(self.raw_text, bioc_json=False)
+        else:
+            doc_bioc = json.loads(self.raw_json)
+            self.open_access = True if "source" in doc_bioc and doc_bioc["source"] == "PMC" else False
+            self.spans, self.raw_text = detect(doc_bioc, bioc_json=True)
         self.spans = sorted(self.spans, key=lambda k: k.start, reverse=True)
 
     def normalize_entities(self, cache_dict={}):

@@ -107,9 +107,14 @@ trash/
 out/
 runs/
 pyscripts/
+GeoBoost_v1/
+GeoBoost_v2/
+SDA/
 .pkl
 .vscode
 .log
+*.bin
+*DS_Store
 gen_training_files.py
 unit_tests.py
 settings.py

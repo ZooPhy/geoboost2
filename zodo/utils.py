@@ -64,7 +64,9 @@ class NamedEntityObj(object):
         '''returns serialized object for conversion to json'''
         if minimal:
             return {'span': self.span.serialize(),
-                    'best_loc': self.best_loc}
+                    'best_loc': self.best_loc,
+                    'probability': self.probability,
+                    }
         else:
             return {'span': self.span.serialize(),
                     'best_loc': self.best_loc,
@@ -235,15 +237,7 @@ def download_supplemental(raw_json):
                     ftp_url = query_re.group(1)
                     pmcdir = ftp_get_query(ftp_url)
                     if pmcdir:
-                        supp_files = [x for x in listdir(pmcdir) if x.split(".")[-1] in SUPPLEMENTAL_DATA_FILETYPES]
-                        logging.debug("Files for extraction in %s : %s", pmcid, ",".join(supp_files))
-                        # For now just extract all text the same way using textract
-                        supp_file_contents = {x:str(textract.process(join(pmcdir, x))).replace("\\n", "\n") for x in supp_files}
-                        supp_contents = ""
-                        for suppfile, content in enumerate(supp_file_contents):
-                            supp_contents += "\n\n*** " + suppfile + " ***\n" + content
-                            logging.debug("Added '%s' chars from '%s'", len(content), suppfile)
-                        supp_text = supp_contents
+                        supp_text = extract_text_from_files(pmcdir)
                 passage["text"] = supp_text
                 break
         # extract based on file format
@@ -253,6 +247,17 @@ def download_supplemental(raw_json):
         logging.error("Cant extract json from %s: %s", pmcid, error)
         return raw_json
     return raw_json
+
+def extract_text_from_files(pmcdir):
+    supp_files = [x for x in listdir(pmcdir) if x.split(".")[-1] in SUPPLEMENTAL_DATA_FILETYPES]
+    logging.debug("Files for extraction in %s : %s", pmcdir, ",".join(supp_files))
+    # For now just extract all text the same way using textract
+    supp_file_contents = {x:str(textract.process(join(pmcdir, x))).replace("\\n", "\n") for x in supp_files}
+    supp_contents = ""
+    for suppfile, content in supp_file_contents.items():
+        supp_contents += "\n\n*** " + str(suppfile) + " ***\n" + str(content)
+        logging.debug("Added '%s' chars from '%s'", len(content), suppfile)
+    return supp_contents
 
 def format_supplemental_data(doc_bioc, supp_files):
     '''Format and add data to original json as per filetype 

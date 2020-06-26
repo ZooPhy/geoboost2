@@ -27,11 +27,14 @@ from zodo.ner.ner_utils import detect, write_annotations
 def write_genbank_run_results(gb_req: GenBankRequest, outdir: str):
     '''Write the results of the Run method to file'''
     # Write the Confidence estimate files
-    cols = ["Accession", "GeonameID", "Location", "Country", "Latitude", "Longitude", "Code", "Confidence"]
+    cols = ["Accession", "Sufficient", "PubMedIDs", "GeonameID", "Location", "Country", "Latitude", "Longitude", "Code", "Confidence"]
     gb_rows = []
     for gb_rec in gb_req.genbank_records:
+        pmids = ", ".join([(str(x.pmid)+" ("+("OA" if x.open_access else "Abstract")+")") for x in gb_rec.pmobjs])
         for loc in gb_rec.possible_locs:
             gb_rows.append([gb_rec.accid,
+                            gb_rec.sufficient,
+                            pmids,
                             loc["GeonameId"],
                             re.sub(r" \([^)]*\)", "", loc["FullHierarchy"]),
                             loc["Country"] if "Country" in loc else "",
@@ -41,18 +44,19 @@ def write_genbank_run_results(gb_req: GenBankRequest, outdir: str):
                             loc["Probability"]
                             ])
     df = pd.DataFrame(gb_rows, columns=cols)
-    outfile = "Confidence.txt"
+    outfile = "Confidence.tsv"
     out_dir = join(outdir, outfile)
     df.to_csv(out_dir, sep='\t')
 
     # Next write the file with best location
-    cols = ["Accession", "PubMedIDs", "Sufficient", "GeonameID", "Location", "Country", "Latitude", "Longitude", "Code", "Confidence"]
+    cols = ["Accession", "Sufficient", "PubMedIDs", "GeonameID", "Location", "Country", "Latitude", "Longitude", "Code", "Confidence"]
     gb_rows = []
     for gb_rec in gb_req.genbank_records:
+        pmids = ", ".join([(str(x.pmid)+" ("+("OA" if x.open_access else "Abstract")+")") for x in gb_rec.pmobjs])
         for loc in gb_rec.possible_locs:
             gb_rows.append([gb_rec.accid,
-                            ",".join(gb_rec.pubmedlinks),
                             gb_rec.sufficient,
+                            pmids,
                             loc["GeonameId"],
                             re.sub(r" \([^)]*\)", "", loc["FullHierarchy"]),
                             loc["Country"] if "Country" in loc else "",
@@ -63,7 +67,7 @@ def write_genbank_run_results(gb_req: GenBankRequest, outdir: str):
                             ])
             break
     df = pd.DataFrame(gb_rows, columns=cols)
-    outfile = "Locations.txt"
+    outfile = "Locations.tsv"
     out_dir = join(outdir, outfile)
     df.to_csv(out_dir, sep='\t')
 

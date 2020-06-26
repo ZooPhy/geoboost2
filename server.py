@@ -37,8 +37,8 @@ def main():
     parser.add_argument('--embvocab', type=int, default=-1,
                         help='load top n words for w2v to save memory. -1 to load all.')
     # API SETTINGS
-    parser.add_argument('--host', type=str, default='localhost',
-                        help="Host name (default: localhost)")
+    parser.add_argument('--host', type=str, default='0.0.0.0',
+                        help="Host name (default: 0.0.0.0)")
     parser.add_argument('--port', type=int, default='8025', help="Port (default: 8025)")
     parser.add_argument('--path', type=str, default='/topo', help="Path (default: /topo)")
     args = parser.parse_args()

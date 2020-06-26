@@ -54,6 +54,11 @@ LATLON_PROBABILITY = 1.0
 STRAIN_PROBABILITY = 0.9
 KEYWORDS_PRESCENCE_PROBABILITY = 0.9
 METADATA_PRESCENCE_PROBABILITY = 0.8
+FLU_STRAIN_PROBABILITY = 1.0
+FLU_KEYWORDS_PRESCENCE_PROBABILITY = 0.2
+FLU_METADATA_PRESCENCE_PROBABILITY = 0.3
+
+LOCATION_MAP = {"Viet Nam":"Vietnam"}
 
 class GenBankRequest(object):
     '''GenBankRecord Request Object'''
@@ -204,6 +209,7 @@ class GenBankRequest(object):
                 continue
             source_country = gb_rec.source["country"] if "country" in gb_rec.source else None
             if source_country:
+                source_country = LOCATION_MAP[source_country] if source_country in LOCATION_MAP else source_country
                 # convert camel case to whitespace delimited text i.e. LaoCai -> Lao Cai
                 source_country = re.sub(r"([a-z])([A-Z])",r"\g<1> \g<2>", source_country)
                 if source_country not in loc_map:
@@ -246,9 +252,20 @@ class GenBankRequest(object):
             if gb_rec.strain_loc:
                 continue
             source_country = gb_rec.source["country"] if "country" in gb_rec.source else None
+            gb_rec.is_flu = True if "organism" in gb_rec.source and "Influenza" in gb_rec.source["organism"] else False
             source_strain = " | ".join(gb_rec.source[x] for x in ["organism", "isolate", "strain"] if x in gb_rec.source)
             if source_strain:
-                query_re = [x for x in nre.findall(STRAIN_LOCATION_REGEX, source_strain, overlapped=True) if x]
+                query_re = []
+                if gb_rec.is_flu:
+                    strain = gb_rec.source["strain"] if "strain" in gb_rec.source else gb_rec.source["organism"]
+                    strain_parts = strain.split("/")
+                    if len(strain_parts) >= 4:
+                        query_re = [strain_parts[1]] if len(strain_parts)==4 else [strain_parts[2]]
+                        query_re = [x for x in query_re if x.lower() not in STRAIN_BLACKLIST]
+                if not query_re:
+                    query_re = [x for x in nre.findall(STRAIN_LOCATION_REGEX, source_strain, overlapped=True) if x]
+                else:
+                    logging.debug("Detected strain location '%s' in '%s'", query_re[0], gb_rec.pmid)
                 # if text is found, process it
                 query_re = [x for x in query_re if x.lower() not in STRAIN_BLACKLIST]
                 if not query_re:
@@ -264,6 +281,8 @@ class GenBankRequest(object):
                        parts = [x for x in parts if x.lower() not in source_country.lower()]
                     loc_txt = ", ".join(parts)
                 if source_country:
+                    source_country = LOCATION_MAP[source_country] if source_country in LOCATION_MAP else source_country
+                    loc_txt = LOCATION_MAP[loc_txt] if loc_txt in LOCATION_MAP else loc_txt
                     # if location in strain field is same as country field, copy the location
                     if loc_txt == source_country:
                         gb_rec.strain_loc = gb_rec.country_loc
@@ -323,9 +342,9 @@ class GenBankRequest(object):
             self.insufficient_codes += ["PCLI", "PCLH", "PCLD", "PCLF", "PCLS", "PCLIX", "PCL"]
             # for finer locations add states and counties wherever applicable
             if self.suff_level == "ADM3":
-                self.insufficient_codes += ["ADM1", "ADM2"]
+                self.insufficient_codes += ["ADM1", "ADM1H", "ADM2"]
             elif self.suff_level == "ADM2":
-                self.insufficient_codes += ["ADM1"]
+                self.insufficient_codes += ["ADM1", "ADM1H"]
         self.insufficient_codes = set(self.insufficient_codes)
         logging.info("Insufficient codes %s", self.insufficient_codes)
 
@@ -467,6 +486,7 @@ class GenBankRecord(object):
         self.latlon_loc = {} # normalized from reverse lookup of lat_lon field if available
         self.sufficient = False
         self.metadata_extract = "" # location representation extracted from metadata
+        self.is_flu = False
         self.pubmedlinks = []
         self.pmobjs = []
         self.possible_locs = []
@@ -475,8 +495,8 @@ class GenBankRecord(object):
         '''
         Extract LOIH based on one or more of the linked PubMed/PMC articles
         '''
-        # if location in country field is found to be sufficient, then assign 100% prob
-        # if lat_lon was also found then assign a probability of 0.5
+        # if location in country field is found to be sufficient, then assign preset prob
+        # if lat_lon was also found then assign a probability, then assign preset prob
         if self.sufficient:
             if self.country_loc:
                 self.country_loc["Probability"] = COUNTRY_PROBABILITY
@@ -492,7 +512,7 @@ class GenBankRecord(object):
 
             # if location in strain field could be extracted assign a probability of 1.0
             if self.strain_loc and self.strain_loc["Code"] not in insufficient_codes:
-                self.strain_loc["Probability"] = STRAIN_PROBABILITY
+                self.strain_loc["Probability"] = FLU_STRAIN_PROBABILITY if self.is_flu else STRAIN_PROBABILITY
                 self.strain_loc["Sufficient"] = True
                 self.possible_locs.append(self.strain_loc)
 
@@ -531,7 +551,13 @@ class GenBankRecord(object):
         # remove locations if country or ancestor is known
         if self.country_loc:
             ancestor_gid = self.country_loc["GeonameId"]
-            # logging.debug("Filtering locations based on %s: %s", self.country_loc["GeonameId"], self.country_loc["Name"])
+            logging.debug("Filtering locations based on %s: %s", self.country_loc["GeonameId"], self.country_loc["Name"])
+            self.filter_locations(ancestor_gid)
+
+        # if flu narrow down based on strain
+        if self.is_flu and self.strain_loc:
+            ancestor_gid = self.strain_loc["GeonameId"]
+            logging.debug("Filtering locations based on %s: %s", self.strain_loc["GeonameId"], self.strain_loc["Name"])
             self.filter_locations(ancestor_gid)
 
         # estimate probabilities of locations being LOIH based on rules
@@ -570,10 +596,10 @@ class GenBankRecord(object):
         try:
             if any(re.findall(metadata_re, sentence, re.IGNORECASE)):
                 # logging.debug("Found very high prob in %s === %s", metadata_re, sentence)
-                entity.probability += METADATA_PRESCENCE_PROBABILITY
+                entity.probability += FLU_METADATA_PRESCENCE_PROBABILITY if self.is_flu else METADATA_PRESCENCE_PROBABILITY
             if any(re.findall(HIGH_PROB_TOKENS_RE, sentence, re.IGNORECASE)):
                 # logging.debug("Found high prob in === %s", sentence)
-                entity.probability += KEYWORDS_PRESCENCE_PROBABILITY
+                entity.probability += FLU_KEYWORDS_PRESCENCE_PROBABILITY if self.is_flu else METADATA_PRESCENCE_PROBABILITY
         except Exception as e:
             logging.debug("Error parsing - %s : %s", e, metadata_re)
         return entity
@@ -583,22 +609,32 @@ class GenBankRecord(object):
         Normalize probabilities
         '''
         # first get the location if already present, usually from the strain field
-        locations = {x["GeonameId"]:x for x in self.possible_locs}
+        locations = {x["GeonameId"]:copy.deepcopy(x) for x in self.possible_locs}
         for pmobj in self.pmobjs:
             for entity in pmobj.entities:
                 for loc in entity.poss_locs:
-                    if loc["GeonameId"] in locations:
-                        prob = locations[loc["GeonameId"]]["Probability"]
-                        prob += loc["Probability"] * entity.probability
-                        locations[loc["GeonameId"]]["Probability"] = prob
-                    else:
+                    if loc["GeonameId"] not in locations:
                         loc["Sufficient"] = True
-                        locations[loc["GeonameId"]] = loc
+                        locations[loc["GeonameId"]] = copy.deepcopy(loc)
+                    prob = locations[loc["GeonameId"]]["Probability"]
+                    prob += (loc["Probability"] * entity.probability)
+                    locations[loc["GeonameId"]]["Probability"] = prob
+
+        # collect probabilities and balance them
+        total_prob = sum([x["Probability"] for _, x in locations.items()])
+        if total_prob > 0:
+            for _, location in locations.items():
+                location["Probability"] = round(location["Probability"]/total_prob, floating_point_precision)
+
+        # Give additional probability boost to strain in influenza virus
+        if self.is_flu:
+            for loc in self.possible_locs:
+                locations[loc["GeonameId"]]["Probability"] += loc["Probability"] 
 
         # if no locations exist at the preferred sufficiency level, then just choose
         # the locations extracted from the metadata and add them to the possible locations
         if len(self.possible_locs) <= 0:
-            for loc in [self.country_loc, self.latlon_loc, self.strain_loc]:
+            for loc in [self.strain_loc, self.latlon_loc, self.country_loc]:
                 if loc:
                     loc["Probability"] = 1.0
                     loc["Sufficient"] = False
@@ -617,7 +653,6 @@ class GenBankRecord(object):
         if total_prob > 0:
             for location in locations_list:
                 location["Probability"] = round(location["Probability"]/total_prob, floating_point_precision)
-
         # assign locations based on 
         self.possible_locs = locations_list
 
