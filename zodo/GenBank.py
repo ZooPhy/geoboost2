@@ -551,13 +551,13 @@ class GenBankRecord(object):
         # remove locations if country or ancestor is known
         if self.country_loc:
             ancestor_gid = self.country_loc["GeonameId"]
-            logging.debug("Filtering locations based on %s: %s", self.country_loc["GeonameId"], self.country_loc["Name"])
+            # logging.debug("Filtering locations based on %s: %s", self.country_loc["GeonameId"], self.country_loc["Name"])
             self.filter_locations(ancestor_gid)
 
         # if flu narrow down based on strain
         if self.is_flu and self.strain_loc:
             ancestor_gid = self.strain_loc["GeonameId"]
-            logging.debug("Filtering locations based on %s: %s", self.strain_loc["GeonameId"], self.strain_loc["Name"])
+            # logging.debug("Filtering locations based on %s: %s", self.strain_loc["GeonameId"], self.strain_loc["Name"])
             self.filter_locations(ancestor_gid)
 
         # estimate probabilities of locations being LOIH based on rules

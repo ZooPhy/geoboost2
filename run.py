@@ -30,7 +30,10 @@ def write_genbank_run_results(gb_req: GenBankRequest, outdir: str):
     cols = ["Accession", "Sufficient", "PubMedIDs", "GeonameID", "Location", "Country", "Latitude", "Longitude", "Code", "Confidence"]
     gb_rows = []
     for gb_rec in gb_req.genbank_records:
-        pmids = ", ".join([(str(x.pmid)+" ("+("OA" if x.open_access else "Abstract")+")") for x in gb_rec.pmobjs])
+        if len(gb_rec.pmobjs) >= len(gb_rec.pubmedlinks):
+            pmids = ", ".join([(str(x.pmid)+" ("+("OA" if x.open_access else "Abstract")+")") for x in gb_rec.pmobjs])
+        else:
+            pmids = ", ".join(gb_rec.pubmedlinks)
         for loc in gb_rec.possible_locs:
             gb_rows.append([gb_rec.accid,
                             gb_rec.sufficient,
