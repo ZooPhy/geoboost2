@@ -160,7 +160,7 @@ def main():
 
     # Text
     sp_txt = subparsers.add_parser('text', help='Extracts geographic locations from text (.txt) files in a directory.')
-    sp_txt.add_argument('txtdir', type=str,
+    sp_txt.add_argument('txt_dir', type=str,
                         help="Path to directory containing text files (.txt)")
     sp_txt.add_argument('outdir', type=str,
                         help='Output dir for Geographic Location annotated texts')
