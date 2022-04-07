@@ -101,7 +101,7 @@ class GenBankRequest(object):
         accessions_for_retrieval, cached_accessions = [], {}
         # if redis is used get the connection
         if USE_REDIS:
-            gbred = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_GB_PROCESSED_DB)
+            gbred = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_GB_PROCESSED_DB, password=REDIS_PASSWORD)
             for accid in self.accessionids:
                 if gbred.exists(accid):
                     # if found, get it from cache

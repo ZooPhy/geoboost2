@@ -29,8 +29,8 @@ class PubMedRequest(object):
         cache_dict = {}
         # retrieve the records using the API or get it from cache
         if USE_REDIS:
-            proc_red = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_PMC_PROCESSED_DB)
-            unpr_red = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_PMC_CACHE_DB)
+            proc_red = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_PMC_PROCESSED_DB, password=REDIS_PASSWORD)
+            unpr_red = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_PMC_CACHE_DB, password=REDIS_PASSWORD)
             for pmid in self.pubmedids:
                 # first check if the records exist in the processed pubmed cache
                 if proc_red.exists(pmid):
