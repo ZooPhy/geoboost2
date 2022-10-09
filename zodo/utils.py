@@ -296,7 +296,29 @@ def ftp_get_query(url, debug=False, retries=1, unzip=True):
                     shutil.copyfileobj(r, f)
             if unzip:
                 with tarfile.open(download_path) as tarf:
-                    tarf.extractall(SUPPLEMENTAL_DATA_DIR)
+                    
+                    import os
+                    
+                    def is_within_directory(directory, target):
+                        
+                        abs_directory = os.path.abspath(directory)
+                        abs_target = os.path.abspath(target)
+                    
+                        prefix = os.path.commonprefix([abs_directory, abs_target])
+                        
+                        return prefix == abs_directory
+                    
+                    def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+                    
+                        for member in tar.getmembers():
+                            member_path = os.path.join(path, member.name)
+                            if not is_within_directory(path, member_path):
+                                raise Exception("Attempted Path Traversal in Tar File")
+                    
+                        tar.extractall(path, members, numeric_owner=numeric_owner) 
+                        
+                    
+                    safe_extract(tarf, SUPPLEMENTAL_DATA_DIR)
                 extdir = SUPPLEMENTAL_DATA_DIR+filename[:-7]
         except Exception as e:
             logging.error("Error in FTP: %s Error: %s", url, e)
